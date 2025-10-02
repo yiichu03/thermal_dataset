@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hard Split Compare</title>
+<meta name="color-scheme" content="light dark" />
+<style>
+  :root { --pos: 50%; --maxw: 1200px; --radius: 14px; }
+  * { box-sizing: border-box }
+  body { margin:0; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+         display:grid; place-items:start center; padding:24px; }
+  .wrap { width:min(100%, var(--maxw)); }
+
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  header h1 { margin:0; font-size:20px; font-weight:600; opacity:.9 }
+  .tabs { display:flex; gap:10px; flex-wrap:wrap }
+  .tab { padding:6px 12px; border:1px solid rgba(0,0,0,.15); border-radius:999px; background:transparent; cursor:pointer; font-size:14px; }
+  .tab.active { border-color:#e66; color:#e66 }
+  @media (prefers-color-scheme: dark) { .tab{ border-color:rgba(255,255,255,.2) } .tab.active{ border-color:#f88; color:#f88 } }
+
+  .compare {
+    position:relative; border-radius:var(--radius); overflow:hidden;
+    box-shadow:0 6px 30px rgba(0,0,0,.10); background:#000;
+    user-select:none; -webkit-user-select:none; touch-action:none;
+  }
+  /* 这张隐形图只负责给容器定高，取左图尺寸 */
+  .sizer { display:block; width:100%; height:auto; opacity:0; pointer-events:none; }
+
+  /* 两张真正显示的图：绝对定位，始终等大覆盖容器 */
+  .img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  /* A 左侧可见：右侧用 clip-path 裁掉 100%-pos 的宽度 */
+  .imgA { clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+  /* B 右侧可见：左侧裁掉 pos 的宽度 */
+  .imgB { clip-path: inset(0 0 0 var(--pos)); }
+
+  /* 中线与圆钮（只做指示，不影响可见区域） */
+  .handle { position:absolute; inset:0 auto 0 calc(var(--pos) - 1px); width:2px; background:#fff; mix-blend-mode:difference; opacity:.9; pointer-events:none; }
+  .knob { position:absolute; left:var(--pos); top:50%; transform:translate(-50%,-50%);
+          width:22px; height:22px; border-radius:50%; border:2px solid #fff; background:rgba(0,0,0,.35); backdrop-filter:blur(2px);
+          box-shadow:0 1px 6px rgba(0,0,0,.25); pointer-events:none; }
+
+  /* 交互层：整块拖动 */
+  .slider { position:absolute; inset:0; appearance:none; -webkit-appearance:none; background:transparent; cursor:ew-resize; }
+  .slider::-webkit-slider-thumb{ -webkit-appearance:none; width:40px; height:40px; background:transparent; border:0; }
+  .slider::-moz-range-thumb{ width:40px; height:40px; background:transparent; border:0; }
+
+  /* 左右角标 */
+  .corner{ position:absolute; top:10px; padding:6px 10px; background:rgba(0,0,0,.55); color:#fff; font-size:13px;
+           border-radius:999px; pointer-events:none; backdrop-filter:blur(2px) }
+  .corner.left{ left:10px } .corner.right{ right:10px }
+
+  footer{ margin-top:10px; font-size:13px; opacity:.7 }
+  a{ color:inherit }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title">Comparisons</h1>
+    <div class="tabs" id="tabs"></div>
+  </header>
+
+  <div class="compare" id="cmp" aria-label="拖动进行对比">
+    <!-- 隐形定高用 -->
+    <img class="sizer" id="sizer" alt="" src="">
+    <!-- 真正显示的两张（始终等大覆盖），用 clip-path 按左右区域硬切分 -->
+    <img class="img imgA" id="imgL" alt="" src="">
+    <img class="img imgB" id="imgR" alt="" src="">
+    <div class="handle" aria-hidden="true"></div>
+    <div class="knob" aria-hidden="true"></div>
+    <input id="slider" class="slider" type="range" min="0" max="100" step="0.1" value="50" aria-label="Divider position">
+    <div class="corner left"  id="labelL">Thermal</div>
+    <div class="corner right" id="labelR">RGB</div>
+  </div>
+
+  <!-- <footer>提示：左右拖动改变分界线（左边显示 Thermal，右边显示 RGB；建议两图尺寸完全一致）。</footer> -->
+</div>
+
+<noscript>
+  <p>（你的浏览器禁用了 JavaScript，下面是静态对比）</p>
+  <img src="img/left.png"  alt="" style="max-width:100%;border:1px solid #ddd;border-radius:8px;margin:4px 0;">
+  <img src="img/right.png" alt="" style="max-width:100%;border:1px solid #ddd;border-radius:8px;">
+</noscript>
+
+<script>
+(async function(){
+  // —— URL 参数（可选）——
+  const qs = new URLSearchParams(location.search);
+  const cfg = {
+    labelL: qs.get('labelL') || 'Thermal',
+    labelR: qs.get('labelR') || 'RGB',
+    title : qs.get('title')  || 'Comparisons',
+    pos   : Number(qs.get('pos') || 50),
+    ext   : (qs.get('ext') || 'png').replace('.', ''),
+    tabs  : (qs.get('tabs') || '').split(',').filter(Boolean)
+  };
+
+  const elSizer = document.getElementById('sizer');
+  const elL = document.getElementById('imgL');
+  const elR = document.getElementById('imgR');
+  const slider = document.getElementById('slider');
+  const tabsBox = document.getElementById('tabs');
+
+  document.getElementById('labelL').textContent = cfg.labelL;
+  document.getElementById('labelR').textContent = cfg.labelR;
+  document.getElementById('title').textContent  = cfg.title;
+
+  function setPos(p){
+    const pct = Math.max(0, Math.min(100, p));
+    document.documentElement.style.setProperty('--pos', pct + '%');
+    slider.value = String(pct);
+  }
+  setPos(cfg.pos);
+
+  slider.addEventListener('input', e => setPos(e.target.value));
+  slider.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 5 : 1;
+    if (e.key === 'ArrowLeft')  setPos(Number(slider.value) - step);
+    if (e.key === 'ArrowRight') setPos(Number(slider.value) + step);
+  });
+
+  // —— 自动收集多组：left.png/right.png, left2.png/right2.png, ... ——
+  async function exists(src){ return new Promise(res => { const im=new Image(); im.onload=()=>res(true); im.onerror=()=>res(false); im.src=src; }); }
+  async function collect(max=20){
+    const out=[];
+    for (let i=1;i<=max;i++){
+      const s = i===1 ? '' : String(i);
+      const left  = `img/left${s}.${cfg.ext}`;
+      const right = `img/right${s}.${cfg.ext}`;
+      // eslint-disable-next-line no-await-in-loop
+      if (await exists(left) && await exists(right)) out.push({left,right,name: cfg.tabs[i-1] || `pair_${i}`});
+    }
+    return out;
+  }
+
+  const PAIRS = await collect();
+  if (PAIRS.length === 0) { PAIRS.push({left:`img/left.${cfg.ext}`, right:`img/right.${cfg.ext}`, name:'pair_1'}); }
+
+  // 装载一组，同时用左图给容器定高
+  async function imgInfo(src){ return new Promise(res => { const im=new Image(); im.onload=()=>res({w:im.naturalWidth,h:im.naturalHeight}); im.src=src; }); }
+  function loadPair(i){
+    const p = PAIRS[i];
+    elSizer.src = p.left;         // 用左图定高
+    elL.src = p.left;
+    elR.src = p.right;
+    [...tabsBox.children].forEach((b,idx)=>b.classList.toggle('active', idx===i));
+    // 尺寸一致性提示（仅控制台）
+    Promise.all([imgInfo(p.left), imgInfo(p.right)]).then(([a,b])=>{
+      if (a.w && b.w && (a.w!==b.w || a.h!==b.h)) {
+        console.warn('[compare] 两图尺寸不一致：', `${a.w}x${a.h}`, `${b.w}x${b.h}`);
+      }
+    });
+  }
+
+  // 渲染 tabs
+  tabsBox.innerHTML = '';
+  PAIRS.forEach((p, i) => {
+    const b = document.createElement('button');
+    b.className = 'tab' + (i===0?' active':'');
+    b.textContent = p.name;
+    b.addEventListener('click', ()=>loadPair(i));
+    tabsBox.appendChild(b);
+  });
+
+  loadPair(0);
+
+  // 支持点击画布直接拖动
+  const cmp = document.getElementById('cmp');
+  let dragging=false;
+  const updateFromPointer = (clientX)=>{
+    const r = cmp.getBoundingClientRect();
+    setPos(((clientX - r.left) / r.width) * 100);
+  };
+  cmp.addEventListener('pointerdown', e => { dragging=true; cmp.setPointerCapture(e.pointerId); updateFromPointer(e.clientX); });
+  cmp.addEventListener('pointermove', e => { if (dragging) updateFromPointer(e.clientX); });
+  cmp.addEventListener('pointerup',   e => { dragging=false; try{cmp.releasePointerCapture(e.pointerId)}catch{}; });
+})();
+</script>
+</body>
+</html>
