@@ -7,8 +7,8 @@ import open3d as o3d
 
 
 RGB_PATH = "path/to/run_20250912_180027/realsense/rgb/1757671248.480000000.png"
-PCD_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/fastlio2/scans.pcd"
-TRAJ_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/fastlio2/scan_states_odom.txt"
+PCD_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scans.pcd"
+TRAJ_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt"
 
 
 # YAML: model: Inverse Brown Conrady
@@ -329,7 +329,7 @@ def main():
         print("[PCD] empty pcd"); return
     print(f"[PCD] N={P_W.shape[0]}")
 
-    P_C = (P_W - p_W_C) @ R_W_C.T
+    P_C = (P_W - p_W_C) @ R_W_C
 
     Z = P_C[:, 2]
     # front = Z > 0
