@@ -10,7 +10,6 @@ RGB_PATH = "path/to/run_20250912_180027/realsense/rgb/1757671248.480000000.png"
 PCD_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scans.pcd"
 TRAJ_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt"
 
-
 # YAML: model: Inverse Brown Conrady
 DIST = np.array([-0.0550349094, 0.0627269447, -0.0008203980, 0.0003794413, -0.0196892563],
                 dtype=np.float64)
@@ -191,7 +190,7 @@ def overlay_points_colormap(img_u,
     return vis
 
 def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
-                          B_R_C, B_p_C, B_R_Tl, B_p_Tl,
+                          B_R_C, B_p_C, B_R_Tl, B_p_Tl,R_rect_Tl,
                           TL_W=640, TL_H=512):
     """
     输入:
@@ -201,6 +200,7 @@ def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
       K_tl  : Tl 的内参 (去畸变后) 3x3
       B_R_C, B_p_C: 机体<-RGB 的外参 (米)
       B_R_Tl,B_p_Tl: 机体<-Tl  的外参 (米)
+      R_rect_Tl : Tl 的矫正旋转
     返回:
       img_tl_rgb : 在 Tl 视角下的彩色图 (TL_H,TL_W,3)
       depth_tl   : Tl 视角下的深度(沿 Tl-Z; 米; 0=空洞) (TL_H,TL_W)
@@ -228,7 +228,11 @@ def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
     p_Tl_C = p_Tl_B + R_Tl_B @ B_p_C
 
     # --- C -> Tl ---
+    # 3D 点在“左目热像（Tl）原始相机坐标系”下的坐标。
     P_Tl = (R_Tl_C @ P_C.T).T + p_Tl_C
+
+    P_Tl = (R_rect_Tl @ P_Tl.T).T         # Tl -> Tl_rect
+
     Ztl = P_Tl[:,2]
     front = Ztl > 0 # 只保留在相机前方的点
     if not np.any(front):
@@ -236,10 +240,10 @@ def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
     P_Tl = P_Tl[front]; Ztl = Ztl[front]; colors = colors[front]
 
     # --- Tl 投影 ---
-    # 从 Tl 的内参矩阵中提取 fx, fy, cx, cy
+    # 从 rectified 的 Tl 的内参矩阵中提取 fx, fy, cx, cy
     fx_tl, fy_tl = K_tl[0,0], K_tl[1,1]
     cx_tl, cy_tl = K_tl[0,2], K_tl[1,2]
-    # 把 Tl 相机坐标系下的 3D 点用内参投到像素平面
+    # 把 rectified Tl 相机坐标系下的 3D 点用内参投到像素平面
     utl = fx_tl * (P_Tl[:,0] / Ztl) + cx_tl
     vtl = fy_tl * (P_Tl[:,1] / Ztl) + cy_tl
 
@@ -393,25 +397,30 @@ def main():
 
     # 6) 保存深度与叠加可视化
     # 把米→毫米（乘 1000），并裁到 uint16 范围再保存 PNG
-    cv2.imwrite(OUT_DEPTH_PNG, np.clip(D*1000.0, 0, 65535).astype(np.uint16))
+    # cv2.imwrite(OUT_DEPTH_PNG, np.clip(D*1000.0, 0, 65535).astype(np.uint16))
     # 保存原始 float32（米）的深度 NPY
     np.save(OUT_DEPTH_NPY, D)
 
-    vis = overlay_points_colormap(
-        img_u, u, v, z,
-        max_pts=9000000,
-        z_range=None,               # 或者 (0.3, 20.0)
-        z_percentiles=(2.0, 50.0),
-        near_is_red=True,
-        draw_circles=False,      
-        radius=2, thickness=-1,
-        seed=0,
-        out_path=OUT_OVERLAY      
-    )
+    # vis = overlay_points_colormap(
+    #     img_u, u, v, z,
+    #     max_pts=9000000,
+    #     z_range=None,               # 或者 (0.3, 20.0)
+    #     z_percentiles=(2.0, 50.0),
+    #     near_is_red=True,
+    #     draw_circles=False,      
+    #     radius=2, thickness=-1,
+    #     seed=0,
+    #     out_path=OUT_OVERLAY      
+    # )
     cv2.imwrite("undist.png", img_u)
-    print(f"[SAVE] {OUT_DEPTH_PNG}, {OUT_DEPTH_NPY}, {OUT_OVERLAY}")
+    print(f"[SAVE] {OUT_DEPTH_PNG}, {OUT_DEPTH_NPY}")
 
     # === 6.5) 把 RGB(含深度) 重投影到左目热像 Tl 视角 ===
+    # stereoRectify 得到的参数
+    R1 = np.array([[ 0.99965096,  0.00361561,  0.02617045],
+               [-0.00355090,  0.99999052, -0.00251879],
+               [-0.02617931,  0.00242499,  0.99965432]], dtype=np.float64)
+    
     TL_W, TL_H = 640, 512
     K_tl = np.array([[302.53882139, 0.0,         305.2902832 ],
                      [0.0,          302.53882139,273.44169617],
@@ -425,12 +434,13 @@ def main():
         K_tl=K_tl,           # Tl 内参 (640x512)
         B_R_C=B_R_C, B_p_C=B_p_C,
         B_R_Tl=B_R_Tl, B_p_Tl=B_p_Tl,
+        R_rect_Tl=R1,       # Tl->Tl_rect
         TL_W=TL_W, TL_H=TL_H
     )
 
     cv2.imwrite("rgb_warped_to_Tl.png", img_tl_rgb)
-    cv2.imwrite("depth_in_Tl_mm.png", np.clip(depth_tl*1000.0, 0, 65535).astype(np.uint16))
-
+    # cv2.imwrite("depth_in_Tl_mm.png", np.clip(depth_tl*1000.0, 0, 65535).astype(np.uint16))
+    np.save("depth_in_Tl_m.npy", depth_tl)
 
 if __name__ == "__main__":
     main()
