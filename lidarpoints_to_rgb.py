@@ -3,22 +3,8 @@ import numpy as np
 import cv2
 import open3d as o3d
 import shutil 
+import argparse
 # ========= 配置 =========
-
-
-# RGB_PATH = "path/to/run_20250912_180027/realsense/rgb/1757671348.973000000.png" 3995.795
-# PCD_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scans.pcd"4103.365 3983.612, 3983.646, 3983.662
-# TRAJ_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt" 
-RGB_PATH = r"D:/run_20250902_170456/run_20250902_170456/realsense/rgb/1756804103.365000000.png"
-PCD_PATH = r"D:/run_20250902_170456/run_20250902_170456/rosbag/fastlio2/scans.pcd"
-TRAJ_PATH = r"D:/run_20250902_170456/run_20250902_170456/rosbag/fastlio2/scan_states_odom.txt"
-TL_RECT_DIR = r"D:/run_20250902_170456/run_20250902_170456/left_thermal/rectified_left"
-
-
-# RGB_PATH = r"D:/run_20250912_180027/realsense/rgb/1757671250.153000000.png"
-# PCD_PATH = r"D:/run_20250912_180027/rosbag/fastlio2/scans.pcd"
-# TRAJ_PATH = r"D:/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt"
-# TL_RECT_DIR = r"D:/run_20250912_180027/left_thermal/rectified_left"
 
 
 CHOOSE_TL_R_C = 1  # 0: B->Tl * B->C; 1: C_R_Tl  # 1
@@ -461,7 +447,10 @@ def write_time_sync_report(out_dir, t_rgb, t_traj_sel, t_tl=None):
     with open(out_txt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print(f"[SAVE] {out_txt_path}")
-
+def _cli():
+    p = argparse.ArgumentParser(description="点云投影到RGB/Tl并导出可视化/深度")
+    p.add_argument("--rgb", dest="rgb_path", required=True, help="RGB PNG 路径")
+    return p.parse_args()
 # ========= 主流程 =========
 def main():
     # 0) 读图与检查尺寸
@@ -529,22 +518,6 @@ def main():
     # P_C 为世界->相机后的点（单位: 米）
     Xc, Yc, Zc = P_C[:,0], P_C[:,1], P_C[:,2]
 
-    # 用于debug # A) “左右前后各 2m”的立方体：|X|≤2, |Y|≤2, |Z|≤2（用于整体对齐检查）
-    # box_mask = (np.abs(Xc) <= 4.0) & (np.abs(Yc) <= 4.0) & (np.abs(Zc) <= 2.0)
-    # P_box = P_C[box_mask]
-    # _save_pcd(P_box, "crop_rgb_frame_cube_pm2m.pcd")
-
-    # # B) 只看“正前方”的可视区域：|X|≤2, |Y|≤2, 0<Z≤2（避免相机身后点影响判断）
-    # front_mask = (np.abs(Xc) <= 4.0) & (np.abs(Yc) <= 4.0) & (Zc > 0.0) & (Zc <= 2.0)
-    # P_front = P_C[front_mask]
-    # _save_pcd(P_front, "crop_rgb_frame_front_0to2m.pcd")
-
-    # # （可选）如果点非常多再做一个更大的前向盒：0<Z≤4 m
-    # front4_mask = (np.abs(Xc) <= 4.0) & (np.abs(Yc) <= 4.0) & (Zc > 0.0) & (Zc <= 4.0)
-    # P_front4 = P_C[front4_mask]
-    # _save_pcd(P_front4, "crop_rgb_frame_front_0to4m.pcd")
-
-
     P_C = P_C[front]; Z = Z[front] # 只保留相机前方的点
     
     u = fx_u * (P_C[:,0]/Z) + cx_u
@@ -569,23 +542,8 @@ def main():
     # 仍为 inf 的像素表示从未被任何点命中，改成 0.0 作为“空洞/无效”标记。
     D[~np.isfinite(D)] = 0.0
 
-    # 6) 保存深度与叠加可视化
-    # 把米→毫米（乘 1000），并裁到 uint16 范围再保存 PNG
-    # cv2.imwrite(_out(OUT_DEPTH_PNG), np.clip(D*1000.0, 0, 65535).astype(np.uint16))
-    # 保存原始 float32（米）的深度 NPY
     np.save(_out(OUT_DEPTH_NPY), D)
 
-    # vis = overlay_points_colormap(
-    #     img_u, u, v, z,
-    #     max_pts=9000000,
-    #     z_range=None,               # 或者 (0.3, 20.0)
-    #     z_percentiles=(2.0, 50.0),
-    #     near_is_red=True,
-    #     draw_circles=False,      
-    #     radius=2, thickness=-1,
-    #     seed=0,
-    #     out_path=OUT_OVERLAY      
-    # )
     cv2.imwrite(_out("undist.png"), img_u)
     print(f"[SAVE] {OUT_DEPTH_PNG}, {OUT_DEPTH_NPY}")
 
@@ -632,4 +590,6 @@ def main():
     return OUT_DIR
 
 if __name__ == "__main__":
+    args = _cli()
+    RGB_PATH = args.rgb_path
     main()
