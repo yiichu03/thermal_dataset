@@ -1,7 +1,6 @@
 .idea/
 .vscode/
 __pycache__/
-docs/
 K.txt
 batch_*.py
 lidarpoints_to_rgb2.py
