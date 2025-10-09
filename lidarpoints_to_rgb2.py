@@ -2,45 +2,35 @@ import os
 import numpy as np
 import cv2
 import open3d as o3d
-import shutil 
+
 # ========= 配置 =========
 
 
-# RGB_PATH = "path/to/run_20250912_180027/realsense/rgb/1757671348.973000000.png" 3995.795
-# PCD_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scans.pcd"4103.365 3983.612, 3983.646, 3983.662
-# TRAJ_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt" 
-RGB_PATH = r"D:/run_20250902_170456/run_20250902_170456/realsense/rgb/1756804103.365000000.png"
-PCD_PATH = r"D:/run_20250902_170456/run_20250902_170456/rosbag/fastlio2/scans.pcd"
-TRAJ_PATH = r"D:/run_20250902_170456/run_20250902_170456/rosbag/fastlio2/scan_states_odom.txt"
-TL_RECT_DIR = r"D:/run_20250902_170456/run_20250902_170456/left_thermal/rectified_left"
+# RGB_PATH = "path/to/run_20250912_180027/realsense/rgb/1757671348.973000000.png"
+# PCD_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scans.pcd"
+# TRAJ_PATH = "path/to/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt"
+# RGB_PATH = "D:/run_20250902_170456/run_20250902_170456/realsense/rgb/1756803970.627000000.png"
+# PCD_PATH = "D:/run_20250902_170456/run_20250902_170456/rosbag/fastlio2/scans.pcd"
+# TRAJ_PATH = "D:/run_20250902_170456/run_20250902_170456/rosbag/fastlio2/scan_states_odom.txt"
+# TL_RECT_DIR = r"D:/run_20250902_170456/run_20250902_170456/left_thermal/rectified_left"
+RGB_PATH = "D:/run_20250912_180027/realsense/rgb/1757671328.975000000.png"
+PCD_PATH = "D:/run_20250912_180027/rosbag/fastlio2/scans.pcd"
+TRAJ_PATH = "D:/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt"
+TL_RECT_DIR = r"D:/run_20250912_180027/left_thermal/rectified_left"
 
+THERMAL_PATH = None  # 例如 "Tl_thermal.png"；None 表示不做热红外叠加
+ALPHA_TL = 0.40      # 叠加到 Tl 图的透明度
+PCTS_TL = (2, 98)    # 伪彩色拉伸分位数（近-远）
+FIXED_RANGE_TL = None  # (zmin, zmax) 固定深度范围(米)，例如 (0.5, 20.0)；None=自适应
 
-# RGB_PATH = r"D:/run_20250912_180027/realsense/rgb/1757671250.153000000.png"
-# PCD_PATH = r"D:/run_20250912_180027/rosbag/fastlio2/scans.pcd"
-# TRAJ_PATH = r"D:/run_20250912_180027/rosbag/fastlio2/scan_states_odom.txt"
-# TL_RECT_DIR = r"D:/run_20250912_180027/left_thermal/rectified_left"
-
-
-CHOOSE_TL_R_C = 1  # 0: B->Tl * B->C; 1: C_R_Tl  # 1
-CHOOSE_L_R_C = 1  # 0: B->L * B->C; 1: L_R_C  
-
-OUT_DIR = None
-OUT_TIMING_TXT = "time.txt"
-# os.makedirs(OUT_DIR, exist_ok=True)
-
-def _out(name: str) -> str:
-    return os.path.join(OUT_DIR, name)
 
 # YAML: model: Inverse Brown Conrady
-# DIST = np.array([-0.05085226, 0.04278795, 0, 0, 0],
-#                 dtype=np.float64)
 DIST = np.array([-0.0550349094, 0.0627269447, -0.0008203980, 0.0003794413, -0.0196892563],
                 dtype=np.float64)
 
 W, H = 640, 480
-fx, fy = 387.4631958008, 386.9000854492 # run_20250902_170456
-# fx, fy = 385.8865966797, 385.3258056641 # run_20250912_180027
-cx, cy = 323.99310727, 244.82031200
+fx, fy = 385.8865966797, 385.3258056641
+cx, cy = 321.5436096191, 243.3150024414
 
 # B->L, B->C
 B_R_L = np.array([[0., -1., 0.],
@@ -51,88 +41,18 @@ B_p_L = np.array([0., 0., 0.], dtype=np.float64)
 B_R_C = np.array([[ 0., 0., 1.],
                   [-1., 0., 0.],
                   [ 0.,-1., 0.]], dtype=np.float64)
-B_p_C = np.array([50., 12., -80. ], dtype=np.float64) / 1000.0  # m
-# B_R_C从相机坐标系到机体坐标系的旋转矩阵 B_p_C相机原点在机体系下的位置
+B_p_C = np.array([50., 12., -80.], dtype=np.float64) / 1000.0  # m
+# B_p_C相机原点在机体系下的位置
 B_R_Tl = np.array([[ 0., 0., 1.],
                   [-1., 0., 0.],
                   [ 0.,-1., 0.]], dtype=np.float64)
 B_p_Tl = np.array([75, 62, -145], dtype=np.float64) / 1000.0  # m
-
-C_R_Tl = np.array([[0.999979691664164, 0.006359021898875782, -0.0004232017641123605],
-                       [-0.006357600546184011, 0.9999744135762715, 0.0032791932067709082],
-                       [0.00044404339730520217, -0.003276436064047327, 0.9999945338811506]], dtype=np.float64) 
-
-C_p_Tl = np.array([-0.07309151021484832, 0.06182557268473313, -0.02263297651799525], dtype=np.float64)  
-
-
-L_q_C = np.array([
-      -0.0025930314846405633,
-       0.7233645800633655,
-      -0.6904201829671065,
-      -0.007545293177736468
-], dtype=np.float64)
-
-L_p_C = np.array([0.012,      # -0.02671709287258754
-                -0.07986985425426218,
-                -0.07194136971184459], dtype=np.float64)
 
 OUT_DEPTH_PNG = "depth_mm.png"
 OUT_DEPTH_NPY = "depth_m.npy"
 OUT_OVERLAY   = "debug_proj_points3.png"
 
 # ========= 工具 =========
-def _set_out_dir(t_img, choose_tl_r_c, choose_l_r_c):
-    """
-    例如 t_img=1756804103.365..., choose=0/1，将 OUT_DIR 设为
-    '1756804103.365000000_00'、'..._01'、'..._10'、'..._11'
-    """
-    global OUT_DIR
-    OUT_DIR = f"{t_img:.9f}_{choose_tl_r_c}{choose_l_r_c}"
-    os.makedirs(OUT_DIR, exist_ok=True)
-
-def _infer_run_root_from_rgb(rgb_path: str) -> str:
-    """
-    给定 .../realsense/rgb/xxxx.png，返回 run 的根目录（即 realsense 之前的那一层）。
-    兼容是否存在重复 run 目录的情况。
-    """
-    p = os.path.normpath(rgb_path)
-    parts = p.split(os.sep)
-    if "realsense" in parts:
-        i = parts.index("realsense")
-        return os.sep.join(parts[:i])  # realsense 之前
-    # 兜底：往上退三层
-    return os.path.dirname(os.path.dirname(os.path.dirname(rgb_path)))
-
-def _auto_set_paths_and_intrinsics_from_rgb(rgb_path: str):
-    """
-    由 RGB 路径自动设置 PCD_PATH / TRAJ_PATH / TL_RECT_DIR，
-    并按 run 选择 fx, fy。cx, cy 不变。
-    """
-    global PCD_PATH, TRAJ_PATH, TL_RECT_DIR, fx, fy
-
-    root = _infer_run_root_from_rgb(rgb_path)
-    # 统一出三类路径（与您原目录结构一致）
-    PCD_PATH = os.path.join(root, "rosbag", "fastlio2", "scans.pcd")
-    TRAJ_PATH = os.path.join(root, "rosbag", "fastlio2", "scan_states_odom.txt")
-    TL_RECT_DIR = os.path.join(root, "left_thermal", "rectified_left")
-
-    # 两套内参（你原注释里的那两套）
-    fx_0902, fy_0902 = 387.4631958008, 386.9000854492
-    fx_0912, fy_0912 = 385.8865966797, 385.3258056641
-
-    # 根据路径中的日期片段或缩写判断
-    root_l = root.replace("\\", "/")
-    if ("20250902_170456" in root_l) or ("0902_170456" in root_l):
-        fx, fy = fx_0902, fy_0902
-        print(f"[INTR] choose fx,fy for 0902_170456: {fx}, {fy}")
-    elif ("20250912_180027" in root_l) or ("0912_180027" in root_l):
-        fx, fy = fx_0912, fy_0912
-        print(f"[INTR] choose fx,fy for 0912_180027: {fx}, {fy}")
-    else:
-        # 若有其他批次，默认沿用 0902；你也可以改成抛异常
-        fx, fy = fx_0902, fy_0902
-        print(f"[INTR] warn: unknown run in path, default to 0902 fx,fy = {fx},{fy}")
-
 def parse_rgb_time_from_name(path):
     # 文件名形如 1757671253.550000000.png
     name = os.path.splitext(os.path.basename(path))[0]
@@ -173,56 +93,43 @@ def quat_to_R(q):
 def nearest_pose(traj, t_query):
     ts = np.array([t for t,_,_ in traj], np.float64)
     idx = int(np.argmin(np.abs(ts - t_query)))
-    t, W_p_L, W_q_L = traj[idx] # W_p_L：雷达在世界系下的位置向量（xyz） q_W_L：雷达在世界系下的姿态四元数（4,），顺序为 (qx,qy,qz,qw)  
+    t, pW_L, qW_L = traj[idx] # p_W_L：雷达在世界系下的位置向量（xyz） q_W_L：雷达在世界系下的姿态四元数（4,），顺序为 (qx,qy,qz,qw)  
     dms = (t - t_query)*1e3 # 选用的姿态时间 t 以及与图像时间 t_query 的误差 dt
-    print("    W_p_L = ", W_p_L)
     print(f"[POSE] use t={t:.9f}, dt={dms:+.2f} ms")
-    return quat_to_R(W_q_L), W_p_L, t
+    return quat_to_R(qW_L), pW_L, t
 
 # ========= 变换：公式直译 =========
-def compose_W_T_C(W_R_L, W_p_L, t_sel=None):
-    '''
-    计算相机在世界坐标系 (W) 下的位姿
-    '''
-    
-    if CHOOSE_L_R_C == 0:
-        # 1. 计算 T^L_B = (T^B_L)^-1, 即从机体(B)到LiDAR(L)的变换
-        L_R_B = B_R_L.T
-        L_p_B = - L_R_B @ B_p_L
+def compose_T_W_C(RW_L, pW_L, t_sel=None):
+    # T^L_B = (T^B_L)^{-1}
+    R_L_B = B_R_L.T
+    p_L_B = - B_R_L.T @ B_p_L
 
-        # W_T_B = W_T_L * L_T_B
-        W_R_B = W_R_L @ L_R_B
-        W_p_B = W_p_L + W_R_L @ L_p_B
+    # T^W_B = T^W_L * T^L_B
+    R_W_B = RW_L @ R_L_B
+    p_W_B = pW_L + RW_L @ p_L_B
 
-        # T^W_C = T^W_B * T^B_C 相机在世界坐标系下
-        W_R_C = W_R_B @ B_R_C
-        W_p_C = W_p_B + W_R_B @ B_p_C
+    # T^W_C = T^W_B * T^B_C 相机在世界坐标系下
+    R_W_C = R_W_B @ B_R_C
+    p_W_C = p_W_B + R_W_B @ B_p_C
 
-        # ====== 调试打印 ======
-        def _fmt_mat(M):
-            return np.array2string(M, formatter={'float_kind':lambda x: f"{x: .6f}"})
-        def _fmt_vec(v):
-            return np.array2string(v, formatter={'float_kind':lambda x: f"{x: .6f}"})
+    # ====== 调试打印 ======
+    def _fmt_mat(M):
+        return np.array2string(M, formatter={'float_kind':lambda x: f"{x: .6f}"})
+    def _fmt_vec(v):
+        return np.array2string(v, formatter={'float_kind':lambda x: f"{x: .6f}"})
 
-        ts = f"{t_sel:.9f}" if t_sel is not None else "N/A"
-        print("\n[DEBUG|compose_W_T_C]")
-        print(f"  time (s): {ts}")
-        print("  LiDAR pose in world  (W<-L):")
-        print("    W_R_L =\n" + _fmt_mat(W_R_L))
-        print("    W_p_L = " + _fmt_vec(W_p_L))
-        print("  Camera pose in world (W<-C):")
-        print("    W_R_C =\n" + _fmt_mat(W_R_C))
-        print("    W_p_C = " + _fmt_vec(W_p_C))
-        print("")
+    ts = f"{t_sel:.9f}" if t_sel is not None else "N/A"
+    print("\n[DEBUG|compose_T_W_C]")
+    print(f"  time (s): {ts}")
+    print("  LiDAR pose in world  (W<-L):")
+    print("    R_W_L =\n" + _fmt_mat(RW_L))
+    print("    p_W_L = " + _fmt_vec(pW_L))
+    print("  Camera pose in world (W<-C):")
+    print("    R_W_C =\n" + _fmt_mat(R_W_C))
+    print("    p_W_C = " + _fmt_vec(p_W_C))
+    print("")
 
-    elif CHOOSE_L_R_C == 1: 
-        L_R_C = quat_to_R(L_q_C)
-        W_R_C = W_R_L @ L_R_C
-        
-        W_p_C = W_p_L + W_R_L @ L_p_C
-
-
-    return W_R_C, W_p_C
+    return R_W_C, p_W_C
 
 def overlay_points_colormap(img_u,
                             u, v, z,
@@ -293,21 +200,20 @@ def overlay_points_colormap(img_u,
         vis[vv, uu] = colors
 
     if out_path:
-        cv2.imwrite(_out(out_path), vis)
+        cv2.imwrite(out_path, vis)
     return vis
 
 def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
-                          B_R_C, B_p_C, B_R_Tl, B_p_Tl,R_rect_Tl,
+                          B_R_C, B_p_C, B_R_Tl, B_p_Tl,
                           TL_W=640, TL_H=512):
     """
     输入:
       img_u : 去畸变后的 RGB (Hc,Wc,3)
       D_c   : 对应的深度(米; 0=无效) (Hc,Wc)
       K_c   : RGB 的去畸变内参 (new_K) 3x3
-      K_tl  : Tl 的内参 (去畸变后) 3x3  取的 P1[:3, :3]，即 左红外 rectified 相机的新内参
+      K_tl  : Tl 的内参 (去畸变后) 3x3
       B_R_C, B_p_C: 机体<-RGB 的外参 (米)
       B_R_Tl,B_p_Tl: 机体<-Tl  的外参 (米)
-      R_rect_Tl : cv2.stereoRectify 给左红外相机的矫正旋转 P_Tl_rect = R1 · P_Tl_orig
     返回:
       img_tl_rgb : 在 Tl 视角下的彩色图 (TL_H,TL_W,3)
       depth_tl   : Tl 视角下的深度(沿 Tl-Z; 米; 0=空洞) (TL_H,TL_W)
@@ -329,21 +235,13 @@ def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
     colors = img_u[vc, uc].copy()         # 颜色数组 (N,3) BGR
 
     # --- 计算 Tl<-C 外参: T^Tl_C = T^Tl_B * T^B_C ---
-    if CHOOSE_TL_R_C == 0:
-        Tl_R_B = B_R_Tl.T #  Tl_R_B 从机体坐标系到TL坐标系的旋转矩阵
-        Tl_p_B = - Tl_R_B @ B_p_Tl # 平移部分是 -R_inv * p
-        Tl_R_C = Tl_R_B @ B_R_C # 旋转部分: Tl_R_C = Tl_R_B * B_R_C
-        Tl_p_C = Tl_p_B + Tl_R_B @ B_p_C # 平移部分: Tl_p_C = Tl_R_B * B_p_C + Tl_p_B
-    elif CHOOSE_TL_R_C == 1:
-        Tl_R_C = C_R_Tl.T
-        Tl_p_C = - Tl_R_C @ C_p_Tl
+    R_Tl_B = B_R_Tl.T #  R_Tl_B 机体相对于 Tl 的旋转
+    p_Tl_B = - R_Tl_B @ B_p_Tl
+    R_Tl_C = R_Tl_B @ B_R_C # B_R_C 相机相对于机体的旋转
+    p_Tl_C = p_Tl_B + R_Tl_B @ B_p_C
 
     # --- C -> Tl ---
-    # 3D 点在“左目热像（Tl）原始相机坐标系”下的坐标。 行向量右乘转置
-    P_Tl = P_C @ Tl_R_C.T + Tl_p_C
-
-    P_Tl = P_Tl @ R_rect_Tl.T      # Tl -> Tl_rect
-
+    P_Tl = (R_Tl_C @ P_C.T).T + p_Tl_C
     Ztl = P_Tl[:,2]
     front = Ztl > 0 # 只保留在相机前方的点
     if not np.any(front):
@@ -351,10 +249,10 @@ def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
     P_Tl = P_Tl[front]; Ztl = Ztl[front]; colors = colors[front]
 
     # --- Tl 投影 ---
-    # 从 rectified 的 Tl 的内参矩阵中提取 fx, fy, cx, cy
+    # 从 Tl 的内参矩阵中提取 fx, fy, cx, cy
     fx_tl, fy_tl = K_tl[0,0], K_tl[1,1]
     cx_tl, cy_tl = K_tl[0,2], K_tl[1,2]
-    # 把 rectified Tl 相机坐标系下的 3D 点用内参投到像素平面
+    # 把 Tl 相机坐标系下的 3D 点用内参投到像素平面
     utl = fx_tl * (P_Tl[:,0] / Ztl) + cx_tl
     vtl = fy_tl * (P_Tl[:,1] / Ztl) + cy_tl
 
@@ -400,68 +298,65 @@ def warp_rgb_to_Tl_simple(img_u, D_c, K_c, K_tl,
 
     return img_tl, depth_tl # 返回 Tl 视角的彩色图和对应深度图
 
-def _iter_timestamp_pngs(dir_path):
-    """
-    产出 (filename, t)；其中 filename 为文件名（含扩展名），
-    t 为由文件名（不含扩展名）解析得到的 float 时间戳。
-    非法文件名会被跳过。
-    """
-    if not os.path.isdir(dir_path):
-        raise FileNotFoundError(f"目录不存在: {dir_path}")
-    for fn in os.listdir(dir_path):
-        if not fn.lower().endswith(".png"):
-            continue
-        name = os.path.splitext(fn)[0]
-        try:
-            t = float(name)
-        except ValueError:
-            continue
-        yield fn, t
+def colorize_depth_meters(D_m, z_range=None, percentiles=(2,98),
+                          near_is_red=True, colormap=None):
+    """米单位深度 -> 伪彩色(BGR)。无效(<=0或NaN/Inf)为黑。"""
+    import numpy as np, cv2
+    if colormap is None:
+        colormap = getattr(cv2, "COLORMAP_TURBO", cv2.COLORMAP_JET)
 
-def find_nearest_rectified_left_thermal(dir_path, t_ref):
-    """
-    返回: (filename, t_sel, dt) 其中 dt = t_sel - t_ref (秒；可正可负)
-    """
-    best = None  # (fn, t, dt)
-    for fn, t in _iter_timestamp_pngs(dir_path):
-        dt = t - t_ref
-        if (best is None) or (abs(dt) < abs(best[2])):
-            best = (fn, t, dt)
-    if best is None:
-        raise FileNotFoundError(f"未在目录中找到任何时间戳命名的 PNG: {dir_path}")
-    fn, t_sel, dt = best
-    print(f"[TL] use t={t_sel:.9f}, dt={dt*1e3:+.2f} ms  file={fn}")
-    return best
+    D = np.asarray(D_m).astype(np.float32)
+    D[~np.isfinite(D)] = 0.0
+    valid = D > 0
 
-def write_time_sync_report(out_dir, t_rgb, t_traj_sel, t_tl=None):
-    """
-    将时间戳与时间差写入 txt。
-    t_tl 允许为 None（表示未找到热像图）。
-    """
-    lines = []
-    lines.append(f"RGB_path: {RGB_PATH}")
-    lines.append(f"TL_rectified_dir: {TL_RECT_DIR}")
-    lines.append(f"TRAJ_path: {TRAJ_PATH}")
-    lines.append("")
+    H, W = D.shape[:2]
+    color = np.zeros((H, W, 3), np.uint8)
+    if not np.any(valid):
+        return color
 
-    lines.append(f"t_RGB (s): {t_rgb:.9f}")
-    lines.append(f"t_traj_selected (s): {t_traj_sel:.9f}")
-    dt_traj_ms = (t_traj_sel - t_rgb) * 1e3
-    lines.append(f"Δt(traj - RGB) (ms): {dt_traj_ms:+.2f}")
-
-    if t_tl is not None:
-        lines.append(f"t_left_thermal_rectified (s): {t_tl:.9f}")
-        dt_tl_ms = (t_tl - t_rgb) * 1e3
-        lines.append(f"Δt(thermal - RGB) (ms): {dt_tl_ms:+.2f}")
+    if z_range is None:
+        lo = float(np.percentile(D[valid], percentiles[0]))
+        hi = float(np.percentile(D[valid], percentiles[1]))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            lo, hi = float(np.min(D[valid])), float(np.max(D[valid]))
     else:
-        lines.append("t_left_thermal_rectified (s): NOT_FOUND")
-        lines.append("Δt(thermal - RGB) (ms): N/A")
+        lo, hi = map(float, z_range)
+        if hi <= lo:
+            hi = lo + 1e-6
 
-    out_txt_path = os.path.join(out_dir, OUT_TIMING_TXT)
-    with open(out_txt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"[SAVE] {out_txt_path}")
+    N = np.zeros_like(D, np.float32)
+    N[valid] = np.clip((D[valid] - lo) / max(1e-9, (hi - lo)), 0, 1)
+    if near_is_red:
+        N[valid] = 1.0 - N[valid]
 
+    U8 = np.zeros_like(D, np.uint8)
+    U8[valid] = np.round(255.0 * N[valid]).astype(np.uint8)
+
+    color = cv2.applyColorMap(U8, colormap)
+    color[~valid] = (0, 0, 0)
+    return color
+
+def read_thermal_as_bgr(path):
+    """读取热红外图：单通道会线性拉伸到8位并转BGR；三/四通道按BGR处理。"""
+    if path is None or not os.path.exists(path):
+        return None
+    raw = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    if raw is None:
+        return None
+    if raw.ndim == 2:
+        rmin, rmax = float(np.min(raw)), float(np.max(raw))
+        if rmax > rmin:
+            tl_u8 = np.clip((raw - rmin) / (rmax - rmin) * 255.0, 0, 255).astype(np.uint8)
+        else:
+            tl_u8 = raw.astype(np.uint8)
+        return cv2.cvtColor(tl_u8, cv2.COLOR_GRAY2BGR)
+    elif raw.ndim == 3:
+        if raw.shape[2] == 4:
+            return cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+        return raw
+    else:
+        return None
+    
 # ========= 主流程 =========
 def main():
     # 0) 读图与检查尺寸
@@ -470,12 +365,8 @@ def main():
     assert (img.shape[1], img.shape[0]) == (W, H), \
         f"Image size {img.shape[1]}x{img.shape[0]} != expected {W}x{H}"
 
-    # 0.1) 根据 RGB 路径自动切换 fx/fy 与三类输入路径
-    _auto_set_paths_and_intrinsics_from_rgb(RGB_PATH)
-
     t_img = parse_rgb_time_from_name(RGB_PATH)
     print(f"[RGB] t={t_img:.9f}")
-    _set_out_dir(t_img, CHOOSE_TL_R_C, CHOOSE_L_R_C) 
 
     # ---------- 0.5) 去畸变 -> 得到 img_u 与 new_K ----------
     K = np.array([[fx, 0, cx],
@@ -494,20 +385,23 @@ def main():
 
     # 1) 读取轨迹并取最近姿态（雷达在世界）
     traj = load_traj(TRAJ_PATH)
-    W_R_L, W_p_L, t_sel = nearest_pose(traj, t_img)
+    R_W_L, p_W_L, t_sel = nearest_pose(traj, t_img)
 
     # 2) 得到相机位姿
-    W_R_C, W_p_C = compose_W_T_C(W_R_L, W_p_L, t_sel=t_sel)
+    R_W_C, p_W_C = compose_T_W_C(R_W_L, p_W_L, t_sel=t_sel)
+    print("[TF] p_W_C (m):", p_W_C)
 
     
+
+
     # 3) 点云（世界）
     pcd = o3d.io.read_point_cloud(PCD_PATH)
     P_W = np.asarray(pcd.points, dtype=np.float64)
     if P_W.size == 0:
         print("[PCD] empty pcd"); return
     print(f"[PCD] N={P_W.shape[0]}")
-    # 平移到相机原点 再把向量从世界轴转到相机轴（行向量，右乘旋转）；列向量写法p_C = W_R_C.T (p_W - W_p_C)
-    P_C = (P_W - W_p_C) @ W_R_C
+
+    P_C = (P_W - p_W_C) @ R_W_C.T
 
     Z = P_C[:, 2]
     # front = Z > 0
@@ -571,30 +465,25 @@ def main():
 
     # 6) 保存深度与叠加可视化
     # 把米→毫米（乘 1000），并裁到 uint16 范围再保存 PNG
-    # cv2.imwrite(_out(OUT_DEPTH_PNG), np.clip(D*1000.0, 0, 65535).astype(np.uint16))
+    cv2.imwrite(OUT_DEPTH_PNG, np.clip(D*1000.0, 0, 65535).astype(np.uint16))
     # 保存原始 float32（米）的深度 NPY
-    np.save(_out(OUT_DEPTH_NPY), D)
+    np.save(OUT_DEPTH_NPY, D)
 
-    # vis = overlay_points_colormap(
-    #     img_u, u, v, z,
-    #     max_pts=9000000,
-    #     z_range=None,               # 或者 (0.3, 20.0)
-    #     z_percentiles=(2.0, 50.0),
-    #     near_is_red=True,
-    #     draw_circles=False,      
-    #     radius=2, thickness=-1,
-    #     seed=0,
-    #     out_path=OUT_OVERLAY      
-    # )
-    cv2.imwrite(_out("undist.png"), img_u)
-    print(f"[SAVE] {OUT_DEPTH_PNG}, {OUT_DEPTH_NPY}")
+    vis = overlay_points_colormap(
+        img_u, u, v, z,
+        max_pts=9000000,
+        z_range=None,               # 或者 (0.3, 20.0)
+        z_percentiles=(2.0, 50.0),
+        near_is_red=True,
+        draw_circles=False,      
+        radius=2, thickness=-1,
+        seed=0,
+        out_path=OUT_OVERLAY      
+    )
+    cv2.imwrite("undist.png", img_u)
+    print(f"[SAVE] {OUT_DEPTH_PNG}, {OUT_DEPTH_NPY}, {OUT_OVERLAY}")
 
     # === 6.5) 把 RGB(含深度) 重投影到左目热像 Tl 视角 ===
-    # stereoRectify 得到的参数
-    R1 = np.array([[ 0.99965096,  0.00361561,  0.02617045],
-               [-0.00355090,  0.99999052, -0.00251879],
-               [-0.02617931,  0.00242499,  0.99965432]], dtype=np.float64)
-    
     TL_W, TL_H = 640, 512
     K_tl = np.array([[302.53882139, 0.0,         305.2902832 ],
                      [0.0,          302.53882139,273.44169617],
@@ -608,28 +497,42 @@ def main():
         K_tl=K_tl,           # Tl 内参 (640x512)
         B_R_C=B_R_C, B_p_C=B_p_C,
         B_R_Tl=B_R_Tl, B_p_Tl=B_p_Tl,
-        R_rect_Tl=R1,       # Tl->Tl_rect
         TL_W=TL_W, TL_H=TL_H
     )
 
-    cv2.imwrite(_out("rgb_warped_to_Tl.png"), img_tl_rgb)
-    # cv2.imwrite(_out("depth_in_Tl_mm.png"), np.clip(depth_tl*1000.0, 0, 65535).astype(np.uint16))
-    np.save(_out("depth_in_Tl_m.npy"), depth_tl)
+    cv2.imwrite("rgb_warped_to_Tl.png", img_tl_rgb)
+    cv2.imwrite("depth_in_Tl_mm.png", np.clip(depth_tl*1000.0, 0, 65535).astype(np.uint16))
 
-    # === 7) 寻找与 RGB 最近的去畸变左热像图，并复制到 OUT_DIR ===
-    t_left = None  # 如果未找到，则保留为 None
-    try:
-        tl_fn, t_left, dt_left = find_nearest_rectified_left_thermal(TL_RECT_DIR, t_img)
-        src_tl = os.path.join(TL_RECT_DIR, tl_fn)
-        dst_tl = os.path.join(OUT_DIR, tl_fn)  # 直接用原时间戳文件名保存
-        shutil.copy2(src_tl, dst_tl)
-        print(f"[TL] copied: {src_tl} -> {dst_tl}")
-    except Exception as e:
-        print(f"[TL] WARN: {e}")
+    # === 6.6) Tl 视角的深度：保存 NPY(米)、伪彩色、以及叠加到热红外 ===
+    # 1) 保存米单位 NPY，便于后处理/多次可视化
+    np.save("depth_in_Tl_m.npy", depth_tl)
 
-    # === 8) 写时间（RGB vs 轨迹、RGB vs 左热像） ===
-    write_time_sync_report(OUT_DIR, t_rgb=t_img, t_traj_sel=t_sel, t_tl=t_left)
-    return OUT_DIR
+    # 2) 生成伪彩色（Tl 视角）
+    depth_tl_color = colorize_depth_meters(
+        depth_tl,
+        z_range=FIXED_RANGE_TL,      # 例如 (0.5, 20.0)；None=自适应
+        percentiles=PCTS_TL,
+        near_is_red=True             # 近处红色更直观
+    )
+    cv2.imwrite("depth_in_Tl_color.png", depth_tl_color)
+
+    # 3) 若提供热红外图，则把伪彩色叠加到热红外上
+    if THERMAL_PATH is not None:
+        tl_img = read_thermal_as_bgr(THERMAL_PATH)
+        if tl_img is not None:
+            if tl_img.shape[:2] != depth_tl_color.shape[:2]:
+                # 简单尺寸对齐；若你已几何配准到 Tl 视角，直接匹配分辨率即可
+                depth_tl_color_rs = cv2.resize(
+                    depth_tl_color, (tl_img.shape[1], tl_img.shape[0]),
+                    interpolation=cv2.INTER_NEAREST
+                )
+            else:
+                depth_tl_color_rs = depth_tl_color
+            tl_overlay = cv2.addWeighted(tl_img, 1.0 - ALPHA_TL, depth_tl_color_rs, ALPHA_TL, 0)
+            cv2.imwrite("depth_overlay_on_Tl.png", tl_overlay)
+            print("[OK] depth_overlay_on_Tl.png")
+        else:
+            print(f"[WARN] cannot read thermal image: {THERMAL_PATH}")
 
 if __name__ == "__main__":
     main()

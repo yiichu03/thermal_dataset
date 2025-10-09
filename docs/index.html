@@ -120,9 +120,9 @@
     if (e.key === 'ArrowRight') setPos(Number(slider.value) + step);
   });
 
-  // —— 自动收集多组：left.png/right.png, left2.png/right2.png, ... ——
+  // —— 自动收集多组：left.png/right.png, left2.png/right2.png, ... 数量——
   async function exists(src){ return new Promise(res => { const im=new Image(); im.onload=()=>res(true); im.onerror=()=>res(false); im.src=src; }); }
-  async function collect(max=20){
+  async function collect(max=80){
     const out=[];
     for (let i=1;i<=max;i++){
       const s = i===1 ? '' : String(i);

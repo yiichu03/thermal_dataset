@@ -1,16 +1,25 @@
-
+""" R1: [[ 0.99965096  0.00361561  0.02617045]
+ [-0.0035509   0.99999052 -0.00251879]
+ [-0.02617931  0.00242499  0.99965432]]
+[[302.53882139   0.         305.2902832 ]
+ [  0.         302.53882139 273.44169617]
+ [  0.           0.           1.        ]]
+[[302.53882139   0.         305.2902832 ]
+ [  0.         302.53882139 273.44169617]
+ [  0.           0.           1.        ]]
+[INFO] New bf(baseline * focal_x): 36.807810080911636 """
 import cv2
 import numpy as np
 import glob
 import os
 import torch
 from tqdm import tqdm
-import pyrealsense2 as rs
+# import pyrealsense2 as rs
 
-dataset_path = "path/to/Nus_thermal_dataset"
+dataset_path = "D:/run_20250902_170456"
 
 scenes = [
-    "run_20250902_161637", 
+    "run_20250902_170456", 
     # "run_20250902_162619",
     # "run_20250902_163806", 
     # "run_20250902_164805",
@@ -142,8 +151,8 @@ K_l = np.array([[344.08059125, 0.0, 320.20695996],
 K_r = np.array([[342.69763215, 0.0, 323.56293972], 
             [0.0, 342.45604858, 267.49213891], 
             [0.0, 0.0, 1.0]], dtype=np.float64)
-K_rgb = np.array([[387.043, 0.0, 321.544],
-        [0.0, 386.48, 243.315],
+K_rgb = np.array([[387.4631958008, 0.0, 321.544],
+        [0.0, 386.9000854492, 243.315],
         [0.0, 0.0, 1.0]])   
 K_rgb_m = np.array([[387.22243591, 0.0, 323.99310727],
         [0.0, 387.07049416, 244.82031200],
@@ -151,7 +160,7 @@ K_rgb_m = np.array([[387.22243591, 0.0, 323.99310727],
 
 D_l = np.array([-0.21823207, 0.04657087, 0.0, 0.0, 0.0], dtype=np.float64) 
 D_r = np.array([-0.22042839, 0.04895111, 0.0, 0.0, 0.0], dtype=np.float64)
-D_rgb = np.array([-0.0550349, 0.0627269, -0.000820398, 0.000379441, -0.0196893], dtype=np.float64)
+D_rgb = np.array([-0.0550349094, 0.0627269447, -0.0008203980, 0.0003794413, -0.0196892563], dtype=np.float64)
 D_rgb_m = np.array([-0.05085226, 0.04278795, 0, 0, 0], dtype=np.float64)
  
 # Left to Right Thermal Cam
@@ -177,6 +186,7 @@ h, w = 512, 640
 R1, R2, P1, P2, Q, _, _ = cv2.stereoRectify(K_l, D_l, K_r, D_r, (w, h), 
                             R_l2r, t_l2r, flags=cv2.CALIB_ZERO_DISPARITY, alpha=0)
 
+print("R1:", R1)
 map1L, map2L = cv2.initUndistortRectifyMap(K_l, D_l, R1, P1, (w, h), cv2.CV_32FC1)
 map1R, map2R = cv2.initUndistortRectifyMap(K_r, D_r, R2, P2, (w, h), cv2.CV_32FC1)
 
@@ -192,10 +202,10 @@ print(f"[INFO] New bf(baseline * focal_x): {-P2[0, 3]}")
 for scene in scenes:
     scene_path = f"{dataset_path}/{scene}"
     print(f"[INFO] Processing {scene_path}")
-    images_left = sorted(glob.glob(os.path.join(scene_path, 'left_thermal/left_associated_depth/*.png')))
-    images_right = sorted(glob.glob(os.path.join(scene_path, 'right_thermal/right_associated_depth/*.png')))
-    image_depth = sorted(glob.glob(os.path.join(scene_path, 'realsense/depth_associated/*.png')))
-    left_rectified_dir = os.path.join(scene_path, "left_thermal/rectified_left")
+    images_left = sorted(glob.glob(os.path.join(scene_path, 'left_thermal/image/*.png')))
+    images_right = sorted(glob.glob(os.path.join(scene_path, 'right_thermal/image/*.png')))
+    image_depth = sorted(glob.glob(os.path.join(scene_path, 'realsense/depth_raw/*.png')))
+    left_rectified_dir = os.path.join(scene_path, "left_thermal/rectified_left2")
     right_rectified_dir = os.path.join(scene_path, "right_thermal/rectified_right")
     depth_rectified_dir = os.path.join(scene_path, "realsense/rectified_depth")
     # disp_rectified_dir = os.path.join(scene_path, "realsense/rectified_disp")
@@ -213,7 +223,8 @@ for scene in scenes:
         base_r = os.path.basename(right)
         base_d = os.path.basename(depth)
 
-        depth_img_reproject = depth_reproject(depth_img, R_d2l, t_d2l, K_rgb_m, D_rgb_m, K_l, D_l)
+        # depth_img_reproject = depth_reproject(depth_img, R_d2l, t_d2l, K_rgb_m, D_rgb_m, K_l, D_l)
+        depth_img_reproject = depth_reproject(depth_img, R_d2l, t_d2l, K_rgb, D_rgb, K_l, D_l)
         if depth_img is None:
             continue
 
@@ -224,8 +235,8 @@ for scene in scenes:
         # rectified_disp = depth_to_disp(rectified_depth, bf)
 
         cv2.imwrite(f"{left_rectified_dir}/{base_l}", rectified_left)      
-        cv2.imwrite(f"{right_rectified_dir}/{base_r}", rectified_right)
-        cv2.imwrite(f"{depth_rectified_dir}/{base_d}", (rectified_depth * 1000.0).astype(np.uint16))
+        # cv2.imwrite(f"{right_rectified_dir}/{base_r}", rectified_right)
+        # cv2.imwrite(f"{depth_rectified_dir}/{base_d}", (rectified_depth * 1000.0).astype(np.uint16))
         # np.save(f"{disp_rectified_dir}/{os.path.splitext(base_d)[0]}.npy", rectified_disp)
 
     
