@@ -4,7 +4,6 @@ __pycache__/
 docs/
 K.txt
 batch_*.py
-img_recitify_reproject.py
 lidarpoints_to_rgb2.py
 readme.txt
 viz_depth.py
